@@ -1,0 +1,10 @@
+[theme]
+primaryColor="#F63366"  # Primary accent color
+backgroundColor="#1ABDC1"  # Background color
+secondaryBackgroundColor="#164C48"  # Sidebar and widget background
+textColor="#FEFEFF"  # Text color
+font="sans serif"  # Default font
+
+
+
+

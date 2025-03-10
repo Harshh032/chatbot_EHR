@@ -1,0 +1,32 @@
+# Ignore the .env file (contains sensitive information)
+# .env
+
+# Ignore virtual environment directories
+venv/
+env/
+.venv/
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore IDE-specific files
+.vscode/
+.idea/
+
+# Ignore build and distribution directories
+build/
+dist/
+*.egg-info/
+
+# Ignore log files
+*.log
+
+# Ignore local development files
+*.local
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore pytest cache
+.pytest_cache/
