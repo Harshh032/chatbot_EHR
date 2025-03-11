@@ -158,6 +158,8 @@ class Neo4jGPTQuery:
             {"role": "system", "content": self.get_system_message(entity_type)},
             {"role": "user", "content": f"Generate a single Cypher query to find information about: {question}"},
         ]
+        
+        # Include conversation history if provided
         if history:
             messages.extend(history)
 
@@ -203,18 +205,29 @@ class Neo4jGPTQuery:
         except Exception as e:
             return f"Query error: {str(e)}"
 
-    def run(self, question, entity_type=None, summarize=True):
+    def run(self, question, entity_type=None, summarize=True, chat_history=None):
         """Handle the full process of generating and executing a Cypher query with optional summarization."""
         raw_results = None
         used_entity_type = None
         all_queries = {}  # Store all generated queries for display
+
+        # Format chat history for LLM context
+        formatted_history = []
+        if chat_history:
+            for msg in chat_history:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    # Only include user questions and assistant answers, not the full data
+                    if msg["role"] == "user":
+                        formatted_history.append({"role": "user", "content": msg["content"]})
+                    elif msg["role"] == "assistant" and "summary" in msg:
+                        formatted_history.append({"role": "assistant", "content": msg["summary"]})
 
         # If entity_type is not explicitly specified (or set to "Auto")
         if not entity_type or entity_type == "Auto":
             entity_types = ["Patient", "Immunization", "Medication", "Condition", "Observation", "AllergyIntolerance", "Test"]
 
             for ent_type in entity_types:
-                cypher = self.construct_cypher(question, entity_type=ent_type)
+                cypher = self.construct_cypher(question, entity_type=ent_type, history=formatted_history)
                 all_queries[ent_type] = cypher
 
                 result = self.query_database(cypher)
@@ -227,12 +240,12 @@ class Neo4jGPTQuery:
 
             # If we've tried all entity types and found nothing, try without specifying
             if raw_results is None:
-                cypher = self.construct_cypher(question)
+                cypher = self.construct_cypher(question, history=formatted_history)
                 all_queries["General"] = cypher
                 raw_results = self.query_database(cypher)
         else:
             # If entity_type is specified, just query for that type
-            cypher = self.construct_cypher(question, entity_type=entity_type)
+            cypher = self.construct_cypher(question, entity_type=entity_type, history=formatted_history)
             all_queries[entity_type] = cypher
             raw_results = self.query_database(cypher)
             used_entity_type = entity_type
@@ -270,6 +283,12 @@ def load_logo():
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+if "show_cypher" not in st.session_state:
+    st.session_state.show_cypher = False
+
 if "gds_db" not in st.session_state:
     st.session_state.gds_db = Neo4jGPTQuery(NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, GROQ_API_KEY)
 
@@ -299,7 +318,9 @@ with st.sidebar:
     
     # Display options
     st.subheader("Display Options")
-    # show_cypher = st.toggle("Show Cypher Queries", value=False)
+    show_cypher = st.toggle("Show Cypher Queries", value=st.session_state.show_cypher)
+    st.session_state.show_cypher = show_cypher
+    
     show_raw_data = st.toggle("Show Raw Data", value=False)
     show_entity_info = st.toggle("Show Entity Information", value=False)
     
@@ -308,6 +329,7 @@ with st.sidebar:
     # Clear chat button
     if st.button("Clear Chat History"):
         st.session_state.messages = []
+        st.session_state.chat_history = []
         st.rerun()
     
     # About section
@@ -361,6 +383,7 @@ if prompt := st.chat_input("Ask about patient data..."):
     # Add user message to chat history
     prompt = prompt.lower()
     st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.chat_history.append({"role": "user", "content": prompt})
     
     # Display user message
     with st.chat_message("user"):
@@ -376,25 +399,30 @@ if prompt := st.chat_input("Ask about patient data..."):
         # Process the entity type selection (use None if "Auto" is selected)
         selected_entity = None if entity_type == "Auto" else entity_type
         
-        # Run the query with the selected entity type
+        # Run the query with the selected entity type and chat history
         response = st.session_state.gds_db.run(
             question=prompt,
             entity_type=selected_entity,
-            summarize=True
+            summarize=True,
+            chat_history=st.session_state.chat_history
         )
         
         # Update assistant message with summary
         message_placeholder.markdown(response["summary"])
         
-        # Add response to chat history
-        st.session_state.messages.append({
+        # Prepare response to add to history
+        assistant_response = {
             "role": "assistant", 
             "summary": response["summary"],
             "cypher": response["cypher"],
             "raw_results": response["raw_results"],
             "entity_type": response["entity_type"],
             "all_queries": response["all_queries"]
-        })
+        }
+        
+        # Add response to both displayed messages and chat history
+        st.session_state.messages.append(assistant_response)
+        st.session_state.chat_history.append({"role": "assistant", "content": response["summary"]})
 
 # Close connection when the app closes
 if st.session_state.gds_db:
