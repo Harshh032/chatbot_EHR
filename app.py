@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 from neo4j import GraphDatabase
 from groq import Groq
+
+# from groq.errors import APIStatusError
 from neo4j.exceptions import CypherSyntaxError
 import time
 from PIL import Image
 import os
-
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -160,17 +161,44 @@ class Neo4jGPTQuery:
             {"role": "user", "content": f"Generate a single Cypher query to find information about: {question}"},
         ]
         
-        # Include conversation history if provided
+        # Include conversation history if provided - but limit to recent messages
         if history:
-            messages.extend(history)
+            # Only use the last 5 message pairs to prevent token limit errors
+            recent_history = history[-10:] if len(history) > 10 else history
+            messages.extend(recent_history)
 
-        response = self.groq_client.chat.completions.create(
-            model="llama3-70b-8192",
-            temperature=0.0,
-            max_tokens=1000,
-            messages=messages
-        )
-        return response.choices[0].message.content
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama3-70b-8192",
+                temperature=0.0,
+                max_tokens=1000,
+                messages=messages
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if e.status_code == 413:
+                # If request was too large, try again without history
+                if history:
+                    try:
+                        # Retry with just the system message and current question
+                        response = self.groq_client.chat.completions.create(
+                            model="llama3-70b-8192",
+                            temperature=0.0,
+                            max_tokens=1000,
+                            messages=[
+                                {"role": "system", "content": self.get_system_message(entity_type)},
+                                {"role": "user", "content": f"Generate a single Cypher query to find information about: {question}"}
+                            ]
+                        )
+                        return response.choices[0].message.content
+                    except Exception as retry_error:
+                        return f"Error generating query: {str(retry_error)}"
+                else:
+                    return f"Error: Request too large. Please try a shorter question."
+            else:
+                return f"API error: {str(e)}"
+        except Exception as e:
+            return f"Error generating query: {str(e)}"
 
     def summarize_results(self, question, results):
         """Summarize the query results using LLM."""
@@ -186,13 +214,22 @@ class Neo4jGPTQuery:
             {"role": "user", "content": "Please summarize these database query results."}
         ]
 
-        response = self.groq_client.chat.completions.create(
-            model="llama3-70b-8192",
-            temperature=0.3,
-            max_tokens=1000,
-            messages=messages
-        )
-        return response.choices[0].message.content
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama3-70b-8192",
+                temperature=0.3,
+                max_tokens=1000,
+                messages=messages
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if e.status_code == 413:
+                # If the results are too large to summarize
+                return "The results are extensive. Please refine your query for more specific information or view the raw data."
+            else:
+                return f"Error summarizing results: {str(e)}"
+        except Exception as e:
+            return f"Error summarizing results: {str(e)}"
 
     def query_database(self, cypher_query):
         """Execute the Cypher query on the Neo4j database."""
@@ -220,8 +257,8 @@ class Neo4jGPTQuery:
                     # Only include user questions and assistant answers, not the full data
                     if msg["role"] == "user":
                         formatted_history.append({"role": "user", "content": msg["content"]})
-                    elif msg["role"] == "assistant" and "summary" in msg:
-                        formatted_history.append({"role": "assistant", "content": msg["summary"]})
+                    elif msg["role"] == "assistant" and "content" in msg:
+                        formatted_history.append({"role": "assistant", "content": msg["content"]})
 
         # If entity_type is not explicitly specified (or set to "Auto")
         if not entity_type or entity_type == "Auto":
@@ -229,8 +266,23 @@ class Neo4jGPTQuery:
 
             for ent_type in entity_types:
                 cypher = self.construct_cypher(question, entity_type=ent_type, history=formatted_history)
+                
+                # Check if we got an error response
+                if cypher.startswith("Error:") or cypher.startswith("API error:"):
+                    all_queries[ent_type] = cypher
+                    if "Request too large" in cypher:
+                        # Early return with the error
+                        return {
+                            "question": question,
+                            "entity_type": None,
+                            "raw_results": None,
+                            "summary": cypher + " The conversation history is too large. Please clear the chat and start a new conversation, or try a more specific question.",
+                            "all_queries": all_queries,
+                            "cypher": cypher
+                        }
+                    continue
+                
                 all_queries[ent_type] = cypher
-
                 result = self.query_database(cypher)
 
                 # If we got actual results (not an error string and not empty)
@@ -240,16 +292,31 @@ class Neo4jGPTQuery:
                     break
 
             # If we've tried all entity types and found nothing, try without specifying
-            if raw_results is None:
+            if raw_results is None and not any(q.startswith("Error:") for q in all_queries.values()):
                 cypher = self.construct_cypher(question, history=formatted_history)
                 all_queries["General"] = cypher
                 raw_results = self.query_database(cypher)
         else:
             # If entity_type is specified, just query for that type
             cypher = self.construct_cypher(question, entity_type=entity_type, history=formatted_history)
-            all_queries[entity_type] = cypher
-            raw_results = self.query_database(cypher)
-            used_entity_type = entity_type
+            
+            # Check if we got an error response
+            if cypher.startswith("Error:") or cypher.startswith("API error:"):
+                all_queries[entity_type] = cypher
+                if "Request too large" in cypher:
+                    # Early return with the error
+                    return {
+                        "question": question,
+                        "entity_type": None,
+                        "raw_results": None,
+                        "summary": cypher + " The conversation history is too large. Please clear the chat and start a new conversation, or try a more specific question.",
+                        "all_queries": all_queries,
+                        "cypher": cypher
+                    }
+            else:
+                all_queries[entity_type] = cypher
+                raw_results = self.query_database(cypher)
+                used_entity_type = entity_type
 
         # Check if results are an error message
         is_error = isinstance(raw_results, str)
@@ -400,30 +467,43 @@ if prompt := st.chat_input("Ask about patient data..."):
         # Process the entity type selection (use None if "Auto" is selected)
         selected_entity = None if entity_type == "Auto" else entity_type
         
-        # Run the query with the selected entity type and chat history
-        response = st.session_state.gds_db.run(
-            question=prompt,
-            entity_type=selected_entity,
-            summarize=True,
-            chat_history=st.session_state.chat_history
-        )
-        
-        # Update assistant message with summary
-        message_placeholder.markdown(response["summary"])
-        
-        # Prepare response to add to history
-        assistant_response = {
-            "role": "assistant", 
-            "summary": response["summary"],
-            "cypher": response["cypher"],
-            "raw_results": response["raw_results"],
-            "entity_type": response["entity_type"],
-            "all_queries": response["all_queries"]
-        }
-        
-        # Add response to both displayed messages and chat history
-        st.session_state.messages.append(assistant_response)
-        st.session_state.chat_history.append({"role": "assistant", "content": response["summary"]})
+        try:
+            # Run the query with the selected entity type and chat history
+            response = st.session_state.gds_db.run(
+                question=prompt,
+                entity_type=selected_entity,
+                summarize=True,
+                chat_history=st.session_state.chat_history
+            )
+            
+            # Update assistant message with summary
+            message_placeholder.markdown(response["summary"])
+            
+            # Prepare response to add to history
+            assistant_response = {
+                "role": "assistant", 
+                "summary": response["summary"],
+                "cypher": response.get("cypher", ""),
+                "raw_results": response.get("raw_results", None),
+                "entity_type": response.get("entity_type", None),
+                "all_queries": response.get("all_queries", {})
+            }
+            
+            # Add response to both displayed messages and chat history
+            st.session_state.messages.append(assistant_response)
+            st.session_state.chat_history.append({"role": "assistant", "content": response["summary"]})
+            
+        except Exception as e:
+            # Handle any unexpected errors
+            error_message = f"An error occurred: {str(e)}"
+            message_placeholder.markdown(error_message)
+            
+            # Add error response to history
+            st.session_state.messages.append({
+                "role": "assistant", 
+                "summary": error_message
+            })
+            st.session_state.chat_history.append({"role": "assistant", "content": error_message})
 
 # Close connection when the app closes
 if st.session_state.gds_db:
