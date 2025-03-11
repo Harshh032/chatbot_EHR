@@ -354,8 +354,6 @@ if "messages" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# if "show_cypher" not in st.session_state:
-#     st.session_state.show_cypher = False
 
 if "gds_db" not in st.session_state:
     st.session_state.gds_db = Neo4jGPTQuery(NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, GROQ_API_KEY)
@@ -385,9 +383,8 @@ with st.sidebar:
     st.markdown("---")
     
     # Display options
-    # st.subheader("Display Options")
-    # show_cypher = st.toggle("Show Cypher Queries", value=st.session_state.show_cypher)
-    # st.session_state.show_cypher = show_cypher
+    st.subheader("Display Options")
+  
     
     show_raw_data = st.toggle("Show Raw Data", value=False)
     show_entity_info = st.toggle("Show Entity Information", value=False)
@@ -428,18 +425,7 @@ for message in st.session_state.messages:
                 if show_entity_info and "entity_type" in message and message["entity_type"]:
                     st.info(f"Entity Type: {message['entity_type']}")
                 
-                # Show Cypher query if enabled
-                # if show_cypher and "cypher" in message:
-                #     with st.expander("View Cypher Query"):
-                #         st.code(message["cypher"], language="cypher")
-                        
-                        # Show all attempted queries if Auto was used
-                        # if "all_queries" in message and len(message["all_queries"]) > 1:
-                        #     st.write("All attempted queries:")
-                        #     for entity, query in message["all_queries"].items():
-                        #         with st.expander(f"{entity} Query"):
-                        #             st.code(query, language="cypher")
-                
+    
                 # Show data table if enabled and results exist
                 if show_raw_data and "raw_results" in message and message["raw_results"]:
                     if not isinstance(message["raw_results"], str):  # Check if results are not an error message
