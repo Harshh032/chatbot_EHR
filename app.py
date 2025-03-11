@@ -354,8 +354,8 @@ if "messages" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-if "show_cypher" not in st.session_state:
-    st.session_state.show_cypher = False
+# if "show_cypher" not in st.session_state:
+#     st.session_state.show_cypher = False
 
 if "gds_db" not in st.session_state:
     st.session_state.gds_db = Neo4jGPTQuery(NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, GROQ_API_KEY)
@@ -385,9 +385,9 @@ with st.sidebar:
     st.markdown("---")
     
     # Display options
-    st.subheader("Display Options")
-    show_cypher = st.toggle("Show Cypher Queries", value=st.session_state.show_cypher)
-    st.session_state.show_cypher = show_cypher
+    # st.subheader("Display Options")
+    # show_cypher = st.toggle("Show Cypher Queries", value=st.session_state.show_cypher)
+    # st.session_state.show_cypher = show_cypher
     
     show_raw_data = st.toggle("Show Raw Data", value=False)
     show_entity_info = st.toggle("Show Entity Information", value=False)
