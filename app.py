@@ -318,7 +318,7 @@ with st.sidebar:
     
     # Display options
     st.subheader("Display Options")
-    show_cypher = st.toggle("Show Cypher Queries", value=st.session_state.show_cypher)
+    # show_cypher = st.toggle("Show Cypher Queries", value=st.session_state.show_cypher)
     st.session_state.show_cypher = show_cypher
     
     show_raw_data = st.toggle("Show Raw Data", value=False)
