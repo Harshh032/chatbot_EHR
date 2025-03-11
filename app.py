@@ -287,8 +287,8 @@ if "messages" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-if "show_cypher" not in st.session_state:
-    st.session_state.show_cypher = False
+# if "show_cypher" not in st.session_state:
+#     st.session_state.show_cypher = False
 
 if "gds_db" not in st.session_state:
     st.session_state.gds_db = Neo4jGPTQuery(NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, GROQ_API_KEY)
